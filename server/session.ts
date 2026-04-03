@@ -78,6 +78,10 @@ export class Session {
               chatId: this.chatId,
             });
           } else if (block.type === "tool_use") {
+            chatStore.addMessage(this.chatId, {
+              role: "assistant",
+              content: `🔧 ${block.name}: ${JSON.stringify(block.input)}`,
+            });
             this.broadcast({
               type: "tool_use",
               toolName: block.name,
