@@ -1,10 +1,12 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import {
+  unstable_v2_createSession,
+  unstable_v2_resumeSession,
+} from "@anthropic-ai/claude-agent-sdk";
 import { execSync } from "child_process";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
-// Extract Claude Code subscription OAuth token
 function getToken(): string {
   const raw =
     process.platform === "darwin"
@@ -24,99 +26,29 @@ const SYSTEM_PROMPT = `You are a helpful AI assistant. You can help users with a
 
 Be concise but thorough in your responses.`;
 
-type UserMessage = {
-  type: "user";
-  message: { role: "user"; content: string };
-};
-
-// Simple async queue - messages go in via push(), come out via async iteration
-class MessageQueue {
-  private messages: UserMessage[] = [];
-  private waiting: ((msg: UserMessage) => void) | null = null;
-  private closed = false;
-
-  push(content: string) {
-    const msg: UserMessage = {
-      type: "user",
-      message: {
-        role: "user",
-        content,
-      },
-    };
-
-    if (this.waiting) {
-      // Someone is waiting for a message - give it to them
-      this.waiting(msg);
-      this.waiting = null;
-    } else {
-      // No one waiting - queue it
-      this.messages.push(msg);
-    }
-  }
-
-  async *[Symbol.asyncIterator](): AsyncIterableIterator<UserMessage> {
-    while (!this.closed) {
-      if (this.messages.length > 0) {
-        yield this.messages.shift()!;
-      } else {
-        // Wait for next message
-        yield await new Promise<UserMessage>((resolve) => {
-          this.waiting = resolve;
-        });
-      }
-    }
-  }
-
-  close() {
-    this.closed = true;
-  }
-}
-
 export class AgentSession {
-  private queue = new MessageQueue();
-  private outputIterator: AsyncIterator<any> | null = null;
+  private session: ReturnType<typeof unstable_v2_createSession>;
 
   constructor() {
-    // Start the query immediately with the queue as input
-    // Cast to any - SDK accepts simpler message format at runtime
-    this.outputIterator = query({
-      prompt: this.queue as any,
-      options: {
-        maxTurns: 100,
-        model: "opus",
-        allowedTools: [
-          "Bash",
-          "Read",
-          "Write",
-          "Edit",
-          "Glob",
-          "Grep",
-          "WebSearch",
-          "WebFetch",
-        ],
-        systemPrompt: SYSTEM_PROMPT,
-      },
-    })[Symbol.asyncIterator]();
+    this.session = unstable_v2_createSession({
+      model: "claude-haiku-4-5-20251001",
+      maxTurns: 100,
+      allowedTools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch"],
+      systemPrompt: SYSTEM_PROMPT,
+    });
   }
 
-  // Send a message to the agent
-  sendMessage(content: string) {
-    this.queue.push(content);
+  async sendMessage(content: string) {
+    await this.session.send(content);
   }
 
-  // Get the output stream
   async *getOutputStream() {
-    if (!this.outputIterator) {
-      throw new Error("Session not initialized");
-    }
-    while (true) {
-      const { value, done } = await this.outputIterator.next();
-      if (done) break;
-      yield value;
+    for await (const msg of this.session.stream()) {
+      yield msg;
     }
   }
 
   close() {
-    this.queue.close();
+    this.session.close();
   }
 }

@@ -30,22 +30,20 @@ export class Session {
   }
 
   // Send a user message to the agent
-  sendMessage(content: string) {
-    // Store user message
+  async sendMessage(content: string) {
     chatStore.addMessage(this.chatId, {
       role: "user",
       content,
     });
 
-    // Broadcast user message to subscribers
     this.broadcast({
       type: "user_message",
       content,
       chatId: this.chatId,
     });
 
-    // Send to agent first (this starts the session if needed)
-    this.agentSession.sendMessage(content);
+    // V2: send() is async, then stream() yields the response
+    await this.agentSession.sendMessage(content);
 
     // Start listening if not already
     if (!this.isListening) {
